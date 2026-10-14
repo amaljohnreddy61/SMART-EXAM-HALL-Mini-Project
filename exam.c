@@ -9,6 +9,8 @@
 #include "interrupt.h"
 #include "delay.h"
 
+#define SECONDS_PER_DAY   86400UL
+
 extern volatile unsigned char Pause_Request;
 
 volatile SYSTEM_STATE SystemState = SYSTEM_IDLE;
@@ -16,48 +18,113 @@ volatile SYSTEM_STATE SystemState = SYSTEM_IDLE;
 extern RTC_TIME CurrentTime;
 RTC_TIME ExamStartTime;
 RTC_TIME ExamEndTime;
+RTC_TIME ExamScheduledTime;
 
-static unsigned char LastSecond = 255;
-static unsigned char SecondCount = 0;
+volatile unsigned char ExamScheduleSet = 0;
+volatile unsigned char ExamLogPending  = 0;
+
+static unsigned char ExamHasStarted = 0;
+static unsigned char ExamHasEnded   = 0;
+
+/* Countdown is driven by RTC seconds-of-day, so time spent inside menus
+ * (password, RTC edit, ...) is still counted and the end time stays exact. */
+static unsigned long LastTotalSec = 0;
+static unsigned long ElapsedSec   = 0;
 
 unsigned int ExamDuration = 0;
 unsigned int RemainingMinutes = 0;
+unsigned int PauseCount = 0;
+
+static unsigned long TimeToSeconds(const RTC_TIME *t)
+{
+    return ((unsigned long)t->hour * 3600UL) +
+           ((unsigned long)t->min  * 60UL)   +
+            (unsigned long)t->sec;
+}
+
+static void LCD_PrintTime(const RTC_TIME *t)
+{
+    if(t->hour < 10) LCD_Data('0');
+    LCD_Integer(t->hour);
+    LCD_Data(':');
+    if(t->min < 10) LCD_Data('0');
+    LCD_Integer(t->min);
+    LCD_Data(':');
+    if(t->sec < 10) LCD_Data('0');
+    LCD_Integer(t->sec);
+}
 
 void Exam_Init(void)
 {
     RemainingMinutes = 0;
-    LastSecond = 255;
-    SecondCount = 0;
+    PauseCount       = 0;
+    ElapsedSec       = 0;
+    LastTotalSec     = 0;
+    ExamHasStarted   = 0;
+    ExamHasEnded     = 0;
+    ExamScheduleSet  = 0;
+    ExamLogPending   = 0;
+}
 
-    /* Nothing is running yet - make sure LEDs are off and the
-     * 7-segment display is blank rather than showing "00". */
-    LED_Status(0, 0);
-    SevenSeg_Off();
+void Exam_SetSchedule(u8 hour, u8 min)
+{
+    ExamScheduledTime.hour = hour;
+    ExamScheduledTime.min  = min;
+    ExamScheduledTime.sec  = 0;
+    ExamScheduleSet        = 1;
+}
+
+/* Called from the main loop: starts the exam by itself when the RTC reaches
+ * the configured start time (hour and minute match). */
+u8 Exam_CheckSchedule(void)
+{
+    if(!ExamScheduleSet)
+        return 0;
+
+    if(SystemState == SYSTEM_RUNNING || SystemState == SYSTEM_PAUSED)
+        return 0;
+
+    if(ExamDuration == 0)
+        return 0;
+
+    RTC_GetTime(&CurrentTime);
+
+    if(CurrentTime.hour == ExamScheduledTime.hour &&
+       CurrentTime.min  == ExamScheduledTime.min)
+    {
+        StartExam();
+        return (SystemState == SYSTEM_RUNNING);
+    }
+
+    return 0;
 }
 
 void StartExam(void)
 {
-    /* Do not start if exam duration is zero */
     if(ExamDuration == 0)
         return;
 
+    /* Record the exact start time from the RTC */
     RTC_GetTime(&ExamStartTime);
 
+    /* Clear previous end time */
+    ExamEndTime.hour = 0;
+    ExamEndTime.min  = 0;
+    ExamEndTime.sec  = 0;
+
+    ExamHasStarted  = 1;
+    ExamHasEnded    = 0;
+    ExamScheduleSet = 0;      /* schedule is used up */
+
     RemainingMinutes = ExamDuration;
+    PauseCount       = 0;      /* new exam, new pause count */
+    ElapsedSec       = 0;
+    LastTotalSec     = TimeToSeconds(&ExamStartTime);
 
-    RTC_GetTime(&CurrentTime);
-
-    LastSecond = CurrentTime.sec;
-    SecondCount = 0;
-
-    /* Clear any stale pause flag left over from a switch press that
-     * happened before this exam started (e.g. while idle), so the
-     * new exam never begins already paused. */
     Pause_Request = 0;
 
     LED_Status(RemainingMinutes, ExamDuration);
 
-    SevenSeg_On();
     SevenSeg_Display(RemainingMinutes);
 
     SystemState = SYSTEM_RUNNING;
@@ -65,26 +132,32 @@ void StartExam(void)
 
 void PauseExam(void)
 {
+    PauseCount++;
+
     SystemState = SYSTEM_PAUSED;
 }
 
 void ResumeExam(void)
 {
+    /* Restart the reference point so paused time is not counted */
     RTC_GetTime(&CurrentTime);
 
-    LastSecond = CurrentTime.sec;
+    LastTotalSec = TimeToSeconds(&CurrentTime);
 
     SystemState = SYSTEM_RUNNING;
 }
 
 void StopExam(void)
 {
+    /* Record the exact end time from the RTC */
     RTC_GetTime(&ExamEndTime);
+
+    ExamHasEnded   = 1;
+    ExamLogPending = 1;
 
     RemainingMinutes = 0;
 
     SevenSeg_Display(0);
-    SevenSeg_Off();
 
     LED_Status(0, ExamDuration);
 
@@ -95,7 +168,10 @@ void StopExam(void)
 
 void Exam_Process(void)
 {
-    /* Keep refreshing display */
+    unsigned long now;
+    unsigned long delta;
+    unsigned int  newRemaining;
+
     SevenSeg_Display(RemainingMinutes);
 
     if(SystemState != SYSTEM_RUNNING)
@@ -106,32 +182,35 @@ void Exam_Process(void)
 
     RTC_GetTime(&CurrentTime);
 
-    /* Execute only once every RTC second */
-    if(CurrentTime.sec != LastSecond)
+    now = TimeToSeconds(&CurrentTime);
+
+    if(now >= LastTotalSec)
+        delta = now - LastTotalSec;
+    else
+        delta = (SECONDS_PER_DAY - LastTotalSec) + now;   /* midnight rollover */
+
+    if(delta == 0)
+        return;
+
+    LastTotalSec = now;
+    ElapsedSec  += delta;
+
+    if(ElapsedSec >= ((unsigned long)ExamDuration * 60UL))
     {
-        LastSecond = CurrentTime.sec;
+        /* Stop immediately at 00 */
+        StopExam();
+        return;
+    }
 
-        SecondCount++;
+    newRemaining = ExamDuration - (unsigned int)(ElapsedSec / 60UL);
 
-        if(SecondCount >= 60)
-        {
-            SecondCount = 0;
+    if(newRemaining != RemainingMinutes)
+    {
+        RemainingMinutes = newRemaining;
 
-            if(RemainingMinutes > 0)
-            {
-                RemainingMinutes--;
+        LED_Status(RemainingMinutes, ExamDuration);
 
-                LED_Status(RemainingMinutes, ExamDuration);
-
-                SevenSeg_Display(RemainingMinutes);
-
-                /* Stop immediately at 00 */
-                if(RemainingMinutes == 0)
-                {
-                    StopExam();
-                }
-            }
-        }
+        SevenSeg_Display(RemainingMinutes);
     }
 }
 
@@ -139,47 +218,30 @@ void ShowExamLogs(void)
 {
     LCD_Clear();
 
-    LCD_String("Start:");
+    if(!ExamHasStarted)
+    {
+        LCD_String("NO EXAM YET");
+        delay_ms(1500);
+        LCD_Clear();
+        return;
+    }
 
-    if(ExamStartTime.hour < 10)
-        LCD_Data('0');
-    LCD_Integer(ExamStartTime.hour);
+    LCD_String("Start ");
+    LCD_PrintTime(&ExamStartTime);
 
-    LCD_Data(':');
+    LCD_GotoXY(1,0);
 
-    if(ExamStartTime.min < 10)
-        LCD_Data('0');
-    LCD_Integer(ExamStartTime.min);
+    if(ExamHasEnded)
+    {
+        LCD_String("End   ");
+        LCD_PrintTime(&ExamEndTime);
+    }
+    else
+    {
+        LCD_String("End   RUNNING");
+    }
 
-    LCD_Data(':');
-
-    if(ExamStartTime.sec < 10)
-        LCD_Data('0');
-    LCD_Integer(ExamStartTime.sec);
-
-    delay_ms(2000);
-
-    LCD_Clear();
-
-    LCD_String("End:");
-
-    if(ExamEndTime.hour < 10)
-        LCD_Data('0');
-    LCD_Integer(ExamEndTime.hour);
-
-    LCD_Data(':');
-
-    if(ExamEndTime.min < 10)
-        LCD_Data('0');
-    LCD_Integer(ExamEndTime.min);
-
-    LCD_Data(':');
-
-    if(ExamEndTime.sec < 10)
-        LCD_Data('0');
-    LCD_Integer(ExamEndTime.sec);
-
-    delay_ms(3000);
+    delay_ms(4000);
 
     LCD_Clear();
 }

@@ -30,11 +30,11 @@ void Interrupt_Init(void)
 }
 
 
-#define DEBOUNCE_US 2000   /* shortened from 20ms for a snappier response */
+#define DEBOUNCE_MS 10
 
 void EINT0_ISR(void)__irq
 {
-    delay_us(DEBOUNCE_US);
+    delay_ms(DEBOUNCE_MS);
 
     if(!(IOPIN0 & (1 << 1)))   /* P0.1 still low -> genuine press */
     {
@@ -48,7 +48,7 @@ void EINT0_ISR(void)__irq
 
 void EINT1_ISR(void)__irq
 {
-    delay_us(DEBOUNCE_US);
+    delay_ms(DEBOUNCE_MS);
 
     if(!(IOPIN0 & (1 << 3)))   /* P0.3 still low -> genuine press */
     {

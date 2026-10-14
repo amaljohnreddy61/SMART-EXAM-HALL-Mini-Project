@@ -1,0 +1,20 @@
+SMART EXAM HALL - CHANGES (files modified: main.c, exam.c, exam.h, led.c, adc.c)
+
+1. Start / end time (as per PDF)
+   - Menu 3 STIME: set exam start hour/minute; exam starts automatically when RTC matches.
+   - Menu 4 START: start exam now.
+   - Start time and end time are recorded from the RTC (StartExam / StopExam).
+   - Menu 5 LOG: shows Start HH:MM:SS and End HH:MM:SS (End RUNNING during exam, NO EXAM YET before).
+   - Log is also shown automatically when the exam ends (buzzer).
+2. Countdown now uses RTC seconds-of-day: menu/password time is still counted, handles midnight.
+3. LED thresholds as per PDF: Green >10 min, Yellow final 10 min, Red last 1 min.
+4. Input validation: duration 01-99, hour 0-23, minute 0-59; non-digit keys ignored.
+5. RTC / duration / start-time edits blocked while exam is running or paused.
+6. Pause count: shown on LCD row 2 as "P:NN" only after the exam has started; also on the
+   EXAM PAUSED screen. Resets when a new exam starts.
+
+7. adc.c: GetTemperature() now drops min/max samples, adds a settling delay and a smoothing filter
+   (software only reduces noise; a floating/loose LM35 pin must be fixed in hardware).
+
+NOT changed: RTC_Init() still resets time on every power-up; LM35 wiring/channel (check jumper, ground, ADC pin).
+Build output files were removed - do a full Rebuild in Keil.

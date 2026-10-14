@@ -6,20 +6,41 @@
 
 static void LCD_EnablePulse(void);
 void LCD_Init(void)
+
 {
+
     IODIR0 |= LCD_D;
+
     IODIR0 |= RS | EN;
 
-    delay_ms(20);
 
-    LCD_Command(0x38); // 8-bit, 2 line
-    LCD_Command(0x0C); // Display ON
-    LCD_Command(0x06); // Entry mode
-    LCD_Command(0x01); // Clear display
+    delay_ms(20);        // wait >15ms after Vcc stable
+
+
+    LCD_Command(0x38);   // function set
+
+    delay_ms(5);         // wait >4.1ms
+
+    LCD_Command(0x38);   // function set again
+
+    delay_us(150);       // wait >100us
+
+    LCD_Command(0x38);   // function set again
+
+
+    LCD_Command(0x38);   // now safe to configure normally
+
+    LCD_Command(0x08);   // display off
+
+    LCD_Command(0x01);   // clear display
 
     delay_ms(2);
-}
 
+    LCD_Command(0x06);   // entry mode
+
+    LCD_Command(0x0C);   // display on
+
+}
 void LCD_Command(u8 cmd)
 {
     IOCLR0 = LCD_D;

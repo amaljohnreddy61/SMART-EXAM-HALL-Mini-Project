@@ -6,29 +6,12 @@
 #include "keypad.h"
 #include "delay.h"
 
-/* Battery-backed general purpose register - survives a reset/power
- * cycle as long as VBAT is held, so it's used here to detect whether
- * the RTC was already set up on a previous run and skip re-stamping
- * it back to the default date/time every time the board resets. */
-#define GPREG0 (*(volatile unsigned long *)0xE0024044)
-#define RTC_INIT_MAGIC 0xA55A
-
 void RTC_Init(void)
 {
     CCR = 0x02;
 
     PREINT  = 456;
     PREFRAC = 25024;
-
-    if(GPREG0 == RTC_INIT_MAGIC &&
-       SEC <= 59 && MIN <= 59 && HOUR <= 23 &&
-       DOM >= 1 && DOM <= 31 && MONTH >= 1 && MONTH <= 12)
-    {
-        /* Already initialised on a previous run and the clock
-         * registers still hold sane values - just resume ticking. */
-        CCR |= 0x01;
-        return;
-    }
 
     SEC   = 0;
     MIN   = 0;
@@ -39,8 +22,6 @@ void RTC_Init(void)
     YEAR  = 2026;
 
     CCR = 0x01;
-
-    GPREG0 = RTC_INIT_MAGIC;
 }
 
 void RTC_GetTime(RTC_TIME *t)

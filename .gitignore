@@ -1,28 +1,18 @@
-# Keil uVision build output / intermediates
+# Keil uVision build output
+Objects/
+Listings/
 *.o
 *.d
 *.crf
-*.lnp
 *.axf
 *.hex
+*.lst
 *.map
 *.htm
-*.lst
 *.build_log.htm
-*.__i
-*.iex
-
-# Keil project user/session state (machine-specific, not source)
-*.uvopt
-*.uvgui.*
+*.dep
+*.lnp
+*.plg
 *.bak
-*_Target*.dep
-
-# OS/editor cruft
-.DS_Store
-Thumbs.db
-*.swp
-
-# Output/build folders some Keil setups create
-Objects/
-Listings/
+*.scvd
+*.uvgui*

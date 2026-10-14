@@ -21,13 +21,20 @@ typedef enum
 
 extern volatile SYSTEM_STATE SystemState;
 
-extern RTC_TIME ExamStartTime;
-extern RTC_TIME ExamEndTime;
+extern RTC_TIME ExamStartTime;       /* RTC time recorded when exam started  */
+extern RTC_TIME ExamEndTime;         /* RTC time recorded when exam ended    */
+extern RTC_TIME ExamScheduledTime;   /* start time configured by invigilator */
+
+extern volatile unsigned char ExamScheduleSet;   /* 1 = scheduled start armed   */
+extern volatile unsigned char ExamLogPending;    /* 1 = show log after exam end */
 
 extern unsigned int ExamDuration;
 extern unsigned int RemainingMinutes;
+extern unsigned int PauseCount;      /* times the exam was paused (this exam) */
 
 void Exam_Init(void);
+void Exam_SetSchedule(u8 hour, u8 min);
+u8   Exam_CheckSchedule(void);       /* returns 1 if it auto-started the exam */
 void StartExam(void);
 void PauseExam(void);
 void ResumeExam(void);

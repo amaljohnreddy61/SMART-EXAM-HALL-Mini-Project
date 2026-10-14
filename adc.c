@@ -1,6 +1,7 @@
 /* adc.c */
 #include <lpc214x.h>
 #include "adc.h"
+#include "delay.h"
 
 void ADC_Init(void)
 {
@@ -36,17 +37,41 @@ u16 ADC_Read(u8 channel)
 
 float GetTemperature(void)
 {
-    unsigned long sum=0;
-	int i;
-	float voltage;
-	float temp;
-	float adc;
-	for(i=0;i<32;i++)
-	{
-	sum+=ADC_Read(3);
-	}
-	adc=sum/32.0f;
-	voltage =(adc*3.3f)/1023.0f;
-	temp=voltage*100.0f;
-	return temp;
+    static float filtered = 0.0f;
+    static u8    first    = 1;
+
+    unsigned long sum = 0;
+    u16 sample, minv = 1023, maxv = 0;
+    u8  i;
+    float adc, temp;
+
+    /* 34 samples: drop the highest and lowest, average the other 32 */
+    for(i = 0; i < 34; i++)
+    {
+        sample = ADC_Read(3);
+
+        if(sample < minv) minv = sample;
+        if(sample > maxv) maxv = sample;
+
+        sum += sample;
+        delay_us(100);              /* let the input settle between samples */
+    }
+
+    sum -= (unsigned long)minv + maxv;
+
+    adc  = sum / 32.0f;
+    temp = (adc * 3.3f * 100.0f) / 1023.0f;   /* LM35: 10 mV per degree C */
+
+    /* Smooth the result so the LCD value does not jump around */
+    if(first)
+    {
+        filtered = temp;
+        first    = 0;
+    }
+    else
+    {
+        filtered += 0.1f * (temp - filtered);
+    }
+
+    return filtered;
 }

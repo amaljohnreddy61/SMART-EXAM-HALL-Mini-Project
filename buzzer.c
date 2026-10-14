@@ -1,4 +1,3 @@
-
 /* buzzer.c */
 
 #include <lpc214x.h>
